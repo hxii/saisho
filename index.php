@@ -46,18 +46,12 @@ class Saisho {
     $fh   = fopen( $filename, 'r' );
     $data = fread( $fh, filesize ( $filename ) );
     fclose( $fh );
-    preg_match_all ( '/(?:\[\[)(.*)(?:\]\] )(.*)\n?/', $data, $matches, PREG_SET_ORDER );
     $page = [];
+    preg_match_all ( '/(?:\[\[)(.*)(?:\]\] )(.*)\n?/', $data, $matches, PREG_SET_ORDER );
     foreach ( $matches as $match ) {
       $page[ $match[ 1 ] ] = $match[ 2 ];
     }
-    $rem = array(
-      '/(\[\[title\]\] ).*\n?/',
-      '/(\[\[description\]\] ).*\n?/',
-      '/(\[\[date\]\] ).*\n?/',
-      '/(\[\[flags\]\] ).*\n?/'
-    );
-    $data = preg_replace( $rem, '', $data );
+    $data = preg_replace( '/(?:\[\[.*\]\] ).*\n?/', '', $data );
     if ( $content ) {
       $page['content'] = $this->parse_markdown( $data );
     }
@@ -85,7 +79,7 @@ class Saisho {
   public function get_page( string $page, bool $metadata_only = false ) {
     if ( file_exists( DATA_FOLDER . DIRECTORY_SEPARATOR . $page ) ) {
       if ( $metadata_only ) {
-        return $this->parse_page( DATA_FOLDER . DIRECTORY_SEPARATOR . $page, false ); 
+        return $this->parse_page( DATA_FOLDER . DIRECTORY_SEPARATOR . $page, false );
       }
       return $this->parse_page( DATA_FOLDER . DIRECTORY_SEPARATOR . $page );
     }
@@ -134,6 +128,12 @@ class Saisho {
     }
   }
 
+  public function include_template() {
+    ob_start();
+    include ( TEMPLATE_FOLDER . '/home.php' );
+    return ob_get_clean();
+  }
+
   /**
    * Load template file and inject content
    *
@@ -142,12 +142,10 @@ class Saisho {
    */
   public function load_template( array $page ) {
     if ( file_exists( TEMPLATE_FOLDER . '/home.php' ) ) {
-      ob_start();
-      $template = include ( TEMPLATE_FOLDER . '/home.php' );
-      $output = ob_get_clean();
-      $output = preg_replace( '/{title}/' , $page['title'], $output );
+      $output = $this->include_template();
+      $output = preg_replace( '/{title}/' , ($page['title'])??'', $output );
       $output = preg_replace( '/{content}/', $page['content'], $output );
-      $output = preg_replace( '/{description}/', $page['description'], $output );
+      $output = preg_replace( '/{description}/', ($page['description'])??'', $output );
       return $output;
     }
   }
@@ -191,10 +189,14 @@ class Saisho {
    * @return array list of pages
    */
   public function get_list( string $sortby = 'by_date', string $order = 'desc' ) {
+    global $config;
     $file_list = glob( DATA_FOLDER . DIRECTORY_SEPARATOR . '*.md' );
     $files = [];
     foreach ( $file_list as $file ) {
       $file                     = basename( $file );
+      if ( substr($file, 0, -3) === $config->home_page ) {
+        continue;
+      }
       $files[ $file ]['filename'] = $file;
       $files[ $file ]['url']      = HOME_URI . DIRECTORY_SEPARATOR . pathinfo( $files[ $file ]['filename'], PATHINFO_FILENAME );
       $files[ $file ]['updated']  = filectime( DATA_FOLDER . DIRECTORY_SEPARATOR . $file );
@@ -216,7 +218,7 @@ class Saisho {
   public function filter( array $pages, string $metadata, $filter, bool $exclude = false ) {
     $only = [];
     foreach ( $pages as $page=>$data ) {
-      if ( array_key_exists( $metadata, $data['metadata'] ) && $data['metadata'][$metadata] === $filter ) {
+      if ( array_key_exists( $metadata, $data['metadata'] ) && strpos($data['metadata'][$metadata], $filter) !== false ) {
         if ( $exclude ) {
           unset( $pages[ $page ] );
         } else {
