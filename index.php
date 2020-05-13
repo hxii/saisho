@@ -79,7 +79,7 @@ class Saisho {
   public function get_page( string $page, bool $metadata_only = false ) {
     if ( file_exists( DATA_FOLDER . DIRECTORY_SEPARATOR . $page ) ) {
       if ( $metadata_only ) {
-        return $this->parse_page( DATA_FOLDER . DIRECTORY_SEPARATOR . $page, false );
+        return $this->parse_page( DATA_FOLDER . DIRECTORY_SEPARATOR . $page, false ); 
       }
       return $this->parse_page( DATA_FOLDER . DIRECTORY_SEPARATOR . $page );
     }
@@ -245,24 +245,56 @@ class Saisho {
       } else {
         uasort( $files, array( $this, 'sort_by_title_asc' ) );
       }
+    } elseif ( $sortby === 'by_position' ) {
+      if ( $order === 'desc' ) {
+        uasort( $files, array( $this, 'sort_by_position_desc' ) );
+      } else {
+        uasort( $files, array( $this, 'sort_by_position_asc' ) );
+      }
     }
     return $files;
   }
 
   function sort_by_date_desc( $a, $b ) {
+    if ( ! (isset($a['metadata']['date']) && isset($b['metadata']['date']) ) ) {
+      return 0;
+    }
     return $a['metadata']['date'] < $b['metadata']['date'];
   }
 
   function sort_by_date_asc( $a, $b ) {
+    if ( ! (isset($a['metadata']['date']) && isset($b['metadata']['date']) ) ) {
+      return 0;
+    }
     return $a['metadata']['date'] > $b['metadata']['date'];
   }
 
   function sort_by_title_desc( $a, $b ) {
+    if ( ! (isset($a['metadata']['title']) && isset($b['metadata']['title']) ) ) {
+      return 0;
+    }
     return $a['metadata']['title'] < $b['metadata']['title'];
   }
 
   function sort_by_title_asc( $a, $b ) {
+    if ( ! (isset($a['metadata']['title']) && isset($b['metadata']['title']) ) ) {
+      return 0;
+    }
     return $a['metadata']['title'] > $b['metadata']['title'];
+  }
+
+  function sort_by_position_desc( $a, $b ) {
+    if ( ! (isset($a['metadata']['position']) && isset($b['metadata']['position']) ) ) {
+      return 0;
+    }
+    return $a['metadata']['position'] < $b['metadata']['position'];
+  }
+
+  function sort_by_position_asc( $a, $b ) {
+    if ( ! (isset($a['metadata']['position']) && isset($b['metadata']['position']) ) ) {
+      return 0;
+    }
+    return $a['metadata']['position'] > $b['metadata']['position'];
   }
 
   /**
