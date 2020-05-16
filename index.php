@@ -4,12 +4,12 @@
       最小  —  Saishō
 
 */
-
-$time = microtime( true );
+$time = microtime(true);
 $where = '';
 $files = [];
 
 define( 'SAISHO', true );
+define( 'SAISHO_VERSION', 0.1 );
 $config = include ( 'config.php' );
 define( 'HOME_URI', $config->host );
 define( 'DATA_FOLDER', $config->data_folder );
@@ -20,9 +20,12 @@ require ( 'inc/ParsedownExtra.php' );
 
 class Saisho {
 
-  public function __construct() {
+  public $config;
+
+  public function __construct( object $config ) {
     $this->where = ( $_SERVER['REQUEST_URI'] === '/' ) ? 'home' : 'page';
-    $this->read_cache();
+    $this->config = $config;
+    $this->handle_cache();
   }
 
   /**
@@ -31,8 +34,7 @@ class Saisho {
    * @return object
    */
   public function get_config() {
-    global $config;
-    return $config;
+    return $this->config;
   }
   
   /**
@@ -46,7 +48,6 @@ class Saisho {
     $fh   = fopen( $filename, 'r' );
     $data = fread( $fh, filesize ( $filename ) );
     fclose( $fh );
-    $page = [];
     preg_match_all ( '/(?:\[\[)(.*)(?:\]\] )(.*)\n?/', $data, $matches, PREG_SET_ORDER );
     foreach ( $matches as $match ) {
       $page[ $match[ 1 ] ] = $match[ 2 ];
@@ -55,7 +56,7 @@ class Saisho {
     if ( $content ) {
       $page['content'] = $this->parse_markdown( $data );
     }
-    return $page;
+    return (array) $page;
   }
 
   /**
@@ -66,7 +67,7 @@ class Saisho {
    */
   private function parse_markdown( string $data ) {
     $parsedown = new ParsedownExtra();
-    return $parsedown->text( $data );
+    return (string) $parsedown->text( $data );
   }
   
   /**
@@ -74,14 +75,14 @@ class Saisho {
    *
    * @param  string $page page file name
    * @param  mixed $metadata_only return metadata alone?
-   * @return void
+   * @return array
    */
   public function get_page( string $page, bool $metadata_only = false ) {
     if ( file_exists( DATA_FOLDER . DIRECTORY_SEPARATOR . $page ) ) {
       if ( $metadata_only ) {
-        return $this->parse_page( DATA_FOLDER . DIRECTORY_SEPARATOR . $page, false ); 
+        return (array) $this->parse_page( DATA_FOLDER . DIRECTORY_SEPARATOR . $page, false ); 
       }
-      return $this->parse_page( DATA_FOLDER . DIRECTORY_SEPARATOR . $page );
+      return (array) $this->parse_page( DATA_FOLDER . DIRECTORY_SEPARATOR . $page );
     }
   }
   
@@ -92,7 +93,28 @@ class Saisho {
    * @return void
    */
   public function get_metadata( string $page ) {
-    return $this->get_page( $page, true );
+    return (array) $this->get_page( $page, true );
+  }
+
+  private function handle_cache() {
+    $hash_time = microtime(true);
+    $request_hash = crc32( $_SERVER['SERVER_NAME'] . $_SERVER['REQUEST_URI'] );
+    $filename = substr( $_SERVER['REQUEST_URI'], 1 ) ?: $this->config->home_page;
+    if ( ! file_exists( DATA_FOLDER . DIRECTORY_SEPARATOR . "{$filename}.md" ) ) {
+      $this->where = 'not_found';
+      http_response_code( 404 );
+      die('404 Not Found');
+    }
+    $cache_filename = CACHE_FOLDER . DIRECTORY_SEPARATOR . "{$request_hash}.html";
+    $cached_file = $this->read_cache( $cache_filename );
+    if ( ! $cached_file ) {
+      $cached_file = $this->write_cache( $filename );
+      if ( $cached_file ) {
+        $cached_file = $this->read_cache( $cache_filename );
+      } else {
+        die('Failed to read/write cache.');
+      }
+    }
   }
 
   /**
@@ -101,36 +123,32 @@ class Saisho {
    *
    * @return void
    */
-  public function read_cache() {
-    $request = $_SERVER['SERVER_NAME'] . $_SERVER['REQUEST_URI'];
-    $request_hash = md5( $request );
-    $filename = substr( $_SERVER['REQUEST_URI'], 1 );
-    $cache_filename = "cache/{$request_hash}.html";
-    $now = time();
+  private function read_cache( string $cache_filename ) {
     if ( file_exists( $cache_filename ) ) {
       global $config;
       $changed = filectime( $cache_filename );
-      if ( -1 !== $config->cache_time && ( $now - $changed ) >= $config->cache_time ) {
-        $this->write_cache( $filename );
-        return;
+      if ( -1 !== $this->config->cache_time && ( time() - $changed ) >= $this->config->cache_time ) {
+        return false;
       }
       $fh = fopen( $cache_filename, 'r' );
       $data = fread( $fh, filesize( $cache_filename ) );
       fclose( $fh );
       header( 'Content-Type:text/html' );
+      header( 'X-Generator: Saisho ' . SAISHO_VERSION );
       ob_start();
       echo $data;
       ob_flush();
       ob_end_clean();
+      return true;
     }
     else {
-      $this->write_cache( $filename );
+      return false;
     }
   }
 
-  public function include_template() {
+  private function include_template( string $template_file ) {
     ob_start();
-    include ( TEMPLATE_FOLDER . '/home.php' );
+    include ( TEMPLATE_FOLDER . DIRECTORY_SEPARATOR . $template_file );
     return ob_get_clean();
   }
 
@@ -140,13 +158,12 @@ class Saisho {
    * @param  object $page
    * @return string html
    */
-  public function load_template( array $page ) {
-    if ( file_exists( TEMPLATE_FOLDER . '/home.php' ) ) {
-      $output = $this->include_template();
-      $output = preg_replace( '/{title}/' , ($page['title'])??'', $output );
-      $output = preg_replace( '/{content}/', $page['content'], $output );
-      $output = preg_replace( '/{description}/', ($page['description'])??'', $output );
-      return $output;
+  private function load_template( array $page, string $template_file = 'home.php' ) {
+    if ( file_exists( TEMPLATE_FOLDER . DIRECTORY_SEPARATOR . $template_file ) ) {
+      $output = $this->include_template( $template_file );
+      $search = ['{title}','{content}','{description}'];
+      $replace = [($page['title'])??'',($page['content'])??'',($page['description'])??''];
+      return (string) str_replace( $search, $replace, $output );
     }
   }
 
@@ -158,27 +175,27 @@ class Saisho {
    */
   private function write_cache( $filename ) {
     if ( 'page' === $this->where ) {
-      $filename = "data/{$filename}.md";
-    }
-    elseif ( 'home' === $this->where ) {
+      $filename = DATA_FOLDER . DIRECTORY_SEPARATOR . "{$filename}.md";
+    } elseif ( 'home' === $this->where ) {
       global $config;
-      $filename = "data/{$config->home_page}.md";
+      $filename = DATA_FOLDER . DIRECTORY_SEPARATOR . "{$this->config->home_page}.md";
+    } elseif ( 'not_found' === $this->where ) {
+
     }
-    if ( ! file_exists( $filename ) ) {
-      http_response_code( 404 );
-      die();
-    }
-    $md5 = md5( $_SERVER['SERVER_NAME'] . $_SERVER['REQUEST_URI'] );
-    $cache_filename = "cache/{$md5}.html";
+    $crc32 = crc32( $_SERVER['SERVER_NAME'] . $_SERVER['REQUEST_URI'] );
+    $cache_filename = CACHE_FOLDER . DIRECTORY_SEPARATOR . "{$crc32}.html";
     $page = $this->parse_page( $filename );
     $template = $this->load_template( $page );
     if ( is_null( $page['content'] ) ) {
-      return;
+      return false;
     }
     $cache_handler = fopen( $cache_filename, 'w' );
+    if ( ! $cache_handler ) {
+      die( 'Failed to open ' . $cache_filename );
+    }
     fwrite( $cache_handler, $template );
     fclose( $cache_handler );
-    $this->read_cache();
+    return true;
   }
 
   /**
@@ -186,24 +203,27 @@ class Saisho {
    *
    * @param  string $sort sorting methods: by_date, by_name
    * @param  string $order order: asc, desc
+   * @param  bool   $metadata return metadata?
    * @return array list of pages
    */
-  public function get_list( string $sortby = 'by_date', string $order = 'desc' ) {
+  public function get_list( string $sortby = 'by_date', string $order = 'desc', bool $metadata = true ) {
     global $config;
     $file_list = glob( DATA_FOLDER . DIRECTORY_SEPARATOR . '*.md' );
     $files = [];
     foreach ( $file_list as $file ) {
       $file                     = basename( $file );
-      if ( substr($file, 0, -3) === $config->home_page ) {
+      if ( basename( $file, '.md' ) === $this->config->home_page ) {
         continue;
       }
       $files[ $file ]['filename'] = $file;
       $files[ $file ]['url']      = HOME_URI . DIRECTORY_SEPARATOR . pathinfo( $files[ $file ]['filename'], PATHINFO_FILENAME );
-      $files[ $file ]['updated']  = filectime( DATA_FOLDER . DIRECTORY_SEPARATOR . $file );
-      $files[ $file ]['metadata'] = $this->get_metadata( $file );
+      $files[ $file ]['updated']  = filectime( DATA_FOLDER . DIRECTORY_SEPARATOR . $files[ $file ]['filename'] );
+      if ( $metadata ) {
+        $files[ $file ]['metadata'] = $this->get_metadata( $files[ $file ]['filename'] );
+      }
     }
     $files = $this->sort_files( $files, $sortby, $order );
-    return $files;
+    return (array) $files;
   }
   
   /**
@@ -227,12 +247,12 @@ class Saisho {
       }
     }
     if ( $exclude ) {
-      return $pages;
+      return (array) $pages;
     }
-    return array_intersect_key( $pages, $only );
+    return (array) array_intersect_key( $pages, $only );
   }
 
-  function sort_files(array $files, string $sortby = 'by_date', string $order = 'desc') {
+  private function sort_files(array $files, string $sortby = 'by_date', string $order = 'desc') {
     if ( $sortby === 'by_date' ) {
       if ( $order === 'desc' ) {
         uasort( $files, array( $this, 'sort_by_date_desc' ) );
@@ -252,45 +272,45 @@ class Saisho {
         uasort( $files, array( $this, 'sort_by_position_asc' ) );
       }
     }
-    return $files;
+    return (array) $files;
   }
 
-  function sort_by_date_desc( $a, $b ) {
+  private function sort_by_date_desc( $a, $b ) {
     if ( ! (isset($a['metadata']['date']) && isset($b['metadata']['date']) ) ) {
       return 0;
     }
     return $a['metadata']['date'] < $b['metadata']['date'];
   }
 
-  function sort_by_date_asc( $a, $b ) {
+  private function sort_by_date_asc( $a, $b ) {
     if ( ! (isset($a['metadata']['date']) && isset($b['metadata']['date']) ) ) {
       return 0;
     }
     return $a['metadata']['date'] > $b['metadata']['date'];
   }
 
-  function sort_by_title_desc( $a, $b ) {
+  private function sort_by_title_desc( $a, $b ) {
     if ( ! (isset($a['metadata']['title']) && isset($b['metadata']['title']) ) ) {
       return 0;
     }
     return $a['metadata']['title'] < $b['metadata']['title'];
   }
 
-  function sort_by_title_asc( $a, $b ) {
+  private function sort_by_title_asc( $a, $b ) {
     if ( ! (isset($a['metadata']['title']) && isset($b['metadata']['title']) ) ) {
       return 0;
     }
     return $a['metadata']['title'] > $b['metadata']['title'];
   }
 
-  function sort_by_position_desc( $a, $b ) {
+  private function sort_by_position_desc( $a, $b ) {
     if ( ! (isset($a['metadata']['position']) && isset($b['metadata']['position']) ) ) {
       return 0;
     }
     return $a['metadata']['position'] < $b['metadata']['position'];
   }
 
-  function sort_by_position_asc( $a, $b ) {
+  private function sort_by_position_asc( $a, $b ) {
     if ( ! (isset($a['metadata']['position']) && isset($b['metadata']['position']) ) ) {
       return 0;
     }
@@ -315,7 +335,5 @@ class Saisho {
   }
 
 }
-
-$saisho = new Saisho();
-
-echo '<code class="g">' . round((microtime(true) - $time) * 1000, 2) . 'ms</code><br>';
+$saisho = new Saisho( $config );
+echo '<code class="g">' . round((microtime(true) - $time)*1000,3) . 'ms</code><br>';
