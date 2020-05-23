@@ -5,11 +5,11 @@
 
 */
 $time = microtime(true);
-$where = '';
+// $where = '';
 $files = [];
 
 define( 'SAISHO', true );
-define( 'SAISHO_VERSION', 0.1 );
+define( 'SAISHO_VERSION', '0.1.1' );
 $config = include ( 'config.php' );
 define( 'HOME_URI', $config->host );
 define( 'DATA_FOLDER', $config->data_folder );
@@ -20,11 +20,12 @@ require ( 'inc/ParsedownExtra.php' );
 
 class Saisho {
 
-  public $config;
+  public $config, $time, $extime;
 
   public function __construct( object $config ) {
-    $this->where = ( $_SERVER['REQUEST_URI'] === '/' ) ? 'home' : 'page';
+    $this->time = microtime(true);
     $this->config = $config;
+    $this->where = ( $_SERVER['REQUEST_URI'] === '/' ) ? 'home' : 'page';
     $this->handle_cache();
   }
 
@@ -78,6 +79,9 @@ class Saisho {
    * @return array
    */
   public function get_page( string $page, bool $metadata_only = false ) {
+    if ( '.md' !== substr( $page, -3 ) ) {
+      $page = $page . '.md';
+    }
     if ( file_exists( DATA_FOLDER . DIRECTORY_SEPARATOR . $page ) ) {
       if ( $metadata_only ) {
         return (array) $this->parse_page( DATA_FOLDER . DIRECTORY_SEPARATOR . $page, false ); 
@@ -98,6 +102,7 @@ class Saisho {
 
   private function handle_cache() {
     $hash_time = microtime(true);
+    $this->rss( $this->config->feed_file );
     $request_hash = crc32( $_SERVER['SERVER_NAME'] . $_SERVER['REQUEST_URI'] );
     $filename = substr( $_SERVER['REQUEST_URI'], 1 ) ?: $this->config->home_page;
     if ( ! file_exists( DATA_FOLDER . DIRECTORY_SEPARATOR . "{$filename}.md" ) ) {
@@ -334,6 +339,44 @@ class Saisho {
     }
   }
 
+  public function build_rss() {
+    global $config;
+    $home = $this->get_page('home');
+    $pages = $this->get_list( 'by_date', 'desc' );
+    $xml = '
+    <rss xmlns:atom="http://www.w3.org/2005/Atom" version="2.0">
+    <channel>
+    <title>'.$home['title'].'</title>
+    <link>'.$config->host.'</link>
+    <description>'.$home['description'].'</description>
+    <generator>Saisho '.SAISHO_VERSION.'</generator>
+    <language>en-us</language>
+    <lastBuildDate>'.date('r').'</lastBuildDate>
+    <atom:link href="'.$config->host.'/index.xml" rel="self" type="application/rss+xml"/>'.PHP_EOL;
+    foreach ( $pages as $page ) {
+      $xml .= '<item>'.PHP_EOL;
+      $xml .= '<title>' . $page['metadata']['title'] . '</title>'.PHP_EOL;
+      $xml .= '<link>' . $page['url'] . '</link>'.PHP_EOL;
+      $xml .= '<pubDate>' . date('r', $page['updated']) . '</pubDate>'.PHP_EOL;
+      $xml .= '<description>' . (($page['metadata']['description'])?? '') . '</description>'.PHP_EOL;
+      $xml .= '</item>'.PHP_EOL;
+    }
+    $xml .= '</channel></rss>';
+    return $xml;
+  }
+
+  public function rss( $filename = 'feed.xml' ) {
+    global $config;
+    if ( ( time() - filemtime($filename) >= $config->feed_time ) || ! file_exists( $filename ) ) {
+      $fh = fopen( $filename, 'w' );
+      if ( ! $fh ) {
+        return false;
+      }
+      fwrite( $fh, $this->build_rss() );
+      fclose( $fh );
+      return $config->host . DIRECTORY_SEPARATOR . 'feed.xml';
+    }
+  }
+
 }
 $saisho = new Saisho( $config );
-echo '<code class="g">' . round((microtime(true) - $time)*1000,3) . 'ms</code><br>';
