@@ -10,8 +10,6 @@ This project was made as a fun learning experiment and is probably full of bugs.
 - [Guide and notes](https://sho.glushak.net/guide)
 - Bug reports and feature requests - https://todo.sr.ht/~hxii/saisho
 
-Note: Included template is based on [Micro (μ)](https://paulglushak.com/u).
-
 Get in touch:
 - [Mastodon](https://merveilles.town/@hxii)
 - [Twitter](https://twitter.com/paulglushak)
