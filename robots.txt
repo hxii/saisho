@@ -1,0 +1,13 @@
+User-agent: *
+Disallow: /cache/
+Disallow: /data/
+Disallow: /inc/
+
+User-agent: *
+Disallow: /*.jpg$
+
+User-agent: *
+Disallow: /*.png$
+
+User-agent: *
+Disallow: /*.html$
